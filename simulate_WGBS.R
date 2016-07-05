@@ -14,7 +14,7 @@
 ###############################################################################
 #main body function which takes lots of params that control the simulated data#
 ###############################################################################
-generate_sim_set <- function(n,m,Pi_m,Pi_d,mean_m,mean_d,prob_m,prob_d,error_m,error_d,phase_diff,outfile,type_of_locations,number_of_replicas,number_of_samples,rates_for_HMM_for_CpG_locations,transition_size,balance,output_path,type){
+generate_sim_set <- function(n,m,Pi_m,Pi_d,mean_m,mean_d,prob_m,prob_d,error_m,error_d,phase_diff,outfile,type_of_locations,number_of_replicas,number_of_samples,rates_for_HMM_for_CpG_locations,transition_size,balance,output_path,type,tranMPar, tranNPar, nonconvPar) {
 #init_simulation <- function (theta,n_mean,n_standard_deviation,number_of_CpGs,probability_of_success_in_differentially_methylated_region,probability_of_success_in_non_differentially_methylated_region,error_rate_in_differentially_methylated_region,mean_number_of_reads_in_differentially_methylated_region,mean_number_of_reads_in_non_differentially_methylated_region,number_of_replicas,number_of_samples,phase_diff,balance,cpg_matrix,){
 
   pdf(paste(output_path,"data.pdf",sep=""))
@@ -26,8 +26,15 @@ generate_sim_set <- function(n,m,Pi_m,Pi_d,mean_m,mean_d,prob_m,prob_d,error_m,e
   #create a set of CpG locations
   locs<-create_simulated_locations(n,Pi_m,rates_for_HMM_for_CpG_locations)
 
-  #simulate the state transition based on the location of the CpGs
-  a<-simulate_state_transition((n*m),c(0.01,0.99,0.08,0.99),locs,0.5,transition_size)
+#    tranMPar; The transition probability in a methylated region:  
+#    tranNPar; The transition probability in an unmethylated region:  0.0577772070946612
+#    message(tranMPar)
+#    message(tranNPar)
+                                        #simulate the state transition based on the location of the CpGs
+    a<-simulate_state_transition((n*m),c(tranMPar[1],0.99,tranNPar[1],0.99),locs,0.5,transition_size, rates = c(tranMPar[2], 1.895e-02, tranNPar[2], 1.895e-02))
+    
+    write.table(a, file = "a.txt", sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE) 
+   
 
   #extract the postions of the blocks
   state_blocks<-find_the_blocks(a)
@@ -45,12 +52,32 @@ generate_sim_set <- function(n,m,Pi_m,Pi_d,mean_m,mean_d,prob_m,prob_d,error_m,e
   spla <- split(as.integer(a[1,]), rep(1:nrow(state_blocks), state_blocks[,4]))
   spldm <- split(as.integer(diff_methed[1,]), rep(1:nrow(state_blocks), state_blocks[,4]))
   dmBlocks <- which(sapply(spldm, function(x) all(x == 1)))
-  leftTransition <- dmBlocks[which(sapply(spla[dmBlocks - 1], function(x) all(!is.null(x)) & all(x == 4)))] - 1
-  rightTransition <- dmBlocks[which(sapply(spla[dmBlocks + 1], function(x) all(!is.null(x)) & all(x == 2)))] + 1
-  spldm[leftTransition] <- sapply(spldm[leftTransition], function(x) rep(1, length(x)))
-  spldm[rightTransition] <- sapply(spldm[rightTransition], function(x) rep(1, length(x)))
+   lT <- (sapply(spla[dmBlocks - 1], function(x) all(!is.null(x)) & all(x == 4))); leftTransition <- dmBlocks[which(lT)] - 1
+    rT <- (sapply(spla[dmBlocks + 1], function(x) all(!is.null(x)) & all(x == 2))); rightTransition <- dmBlocks[which(rT)] + 1
+    spldm[leftTransition] <- lapply(spldm[leftTransition], function(x) rep(1, length(x)))
+    spldm[rightTransition] <- lapply(spldm[rightTransition], function(x) rep(1, length(x)))
 
-  diff_methed[1,] <- unlist(spldm)  
+# according to the balance, makes change in differential methylation all in one direction (balance = 0), all in the other direction(balance = 1) or something in between.
+    mult <- sample(c(-1, 1), size = length(dmBlocks), replace = TRUE, prob = c(balance, 1-balance))
+    mult_n <- mult_m <- spldm;
+
+    zMult <- c(dmBlocks[intersect(which(lT), which(mult == -1))] - 1,
+               dmBlocks[mult == -1],
+               dmBlocks[intersect(which(lT), which(mult == -1))] + 1)
+    mult_m[zMult] <- lapply(mult_m[zMult], function(x) rep(0, length(x)))
+    mult_m <- unlist(mult_m)
+    
+    zMult <- c(dmBlocks[intersect(which(lT), which(mult == 1))] - 1,
+                   dmBlocks[mult == 1],
+                   dmBlocks[intersect(which(lT), which(mult == 1))] + 1)
+    mult_n[zMult] <- lapply(mult_n[zMult], function(x) rep(0, length(x)))
+    mult_n <- unlist(mult_n)
+
+    
+    diff_methed[1,] <- unlist(spldm)
+    
+    write.table(diff_methed, file = "diff_methed.txt", sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE)
+
 
 
   #create the simulated reads methylated/unmethylated at each CpG, at the moment this is hard coded to be 3 replicates of each type
@@ -58,23 +85,42 @@ generate_sim_set <- function(n,m,Pi_m,Pi_d,mean_m,mean_d,prob_m,prob_d,error_m,e
   ds <- (number_of_replicas*number_of_samples)*4
   d <- matrix(data=0,nrow=ds,ncol=n)
   idx <- -(number_of_replicas*4) + 1
-  #prob_d_mod<-hypo_hyper(prob_d,phase_diff[2],a,balance)
-  prob_d_mod<-hypo_hyper_diffs(prob_d,phase_diff[2],diff_methed,balance)
-  prob_m_mod<-hypo_hyper_diffs(prob_m,phase_diff[2],diff_methed,balance)
-  hist(prob_d_mod,main="prob_d_mod")
-  #prob_d_nonmod<-hypo_hyper(prob_d,phase_diff[1],a,balance)
-  prob_d_nonmod<-hypo_hyper_diffs(prob_d,phase_diff[1],diff_methed,balance)
-  prob_m_nonmod<-hypo_hyper_diffs(prob_m,phase_diff[1],diff_methed,balance)
-  hist(prob_d_nonmod,main="prob_d_nonmod")
+  
+      assignProbs <- function(prob, diff, probMod) {
+        pm <- rep(prob, length(probMod))
+        pm[probMod == 1] <- prob + diff
+        pm <- pmin(1, pm); pm <- pmax(0, pm)
+        pm
+    }
+
+    prob_d_mod <- assignProbs(prob_d, phase_diff[1], mult_m)
+    prob_m_mod <- assignProbs(prob_m, -phase_diff[2], mult_m)
+
+    prob_d_nonmod <- assignProbs(prob_d, phase_diff[1], mult_n)
+    prob_m_nonmod <- assignProbs(prob_m, -phase_diff[2], mult_n)
+  
+                                        #prob_d_mod<-hypo_hyper(prob_d,phase_diff[2],a,balance)
+#    prob_d_mod<-hypo_hyper_diffs(prob_d,phase_diff[2],diff_methed,balance)
+#    prob_m_mod<-hypo_hyper_diffs(prob_m,phase_diff[2],diff_methed,balance)
+#    hist(prob_m_mod,main="prob_d_mod")
+                                        #prob_d_nonmod<-hypo_hyper(prob_d,phase_diff[1],a,balance)
+#    prob_d_nonmod<-hypo_hyper_diffs(prob_d,phase_diff[1],diff_methed,balance)
+#    prob_m_nonmod<-hypo_hyper_diffs(prob_m,phase_diff[1],diff_methed,balance)
+    
+#    hist(prob_d_nonmod,main="prob_d_nonmod")
+
+    save(prob_d, prob_m, prob_d_mod, prob_m_mod, prob_d_nonmod, prob_m_nonmod, phase_diff, diff_methed, balance, mult_n, mult_m, a, file = "probmod.RData")
+
   probs<-list()
-  probs[[1]]<-list(prob_m_mod,((prob_m_nonmod+prob_d_nonmod)/2),prob_d_mod,((prob_m_mod+prob_d_mod)/2))
+    # probs[[1]][[2]] should be (prob_m_mod+prob_d_mod) / 2, not ((prob_m_nonmod+prob_d_nonmod)/2) - TJH
+  probs[[1]]<-list(prob_m_mod,((prob_m_mod+prob_d_mod)/2),prob_d_mod,((prob_m_mod+prob_d_mod)/2))
   probs[[2]]<-list(prob_m_nonmod,((prob_m_nonmod+prob_d_nonmod)/2),prob_d_nonmod,((prob_m_nonmod+prob_d_nonmod)/2))
   errors<-list(error_m,((error_d+error_m)/2),error_d,((error_d+error_m)/2))
   means<-list(mean_m,((mean_d+mean_m)/2),mean_d,((mean_d+mean_m)/2))
 
-
-  write("\nCreating the simulated dateset.\n",stderr())
+  write("\nCreating the simulated dataset.\n",stderr())
   pb <- txtProgressBar(style=3)
+  pdf("locd.pdf")
   for(i in 1:number_of_samples){
     idx <- idx + (4*number_of_replicas)
     for(j in 1:number_of_replicas){
@@ -96,6 +142,19 @@ generate_sim_set <- function(n,m,Pi_m,Pi_d,mean_m,mean_d,prob_m,prob_d,error_m,e
         }
     }
   }
+  dev.off()
+  
+  # non-conversion
+      if(!any(is.na(nonconvPar))) {
+        Cs <- d[1:(nrow(d) / 4) * 4 - 3,]
+        Ns <- d[1:(nrow(d) / 4) * 4 - 1,]
+        nonconv <- rbeta(nrow(Cs), nonconvPar[1], nonconvPar[2])
+        write.table(nonconv, file = "nonconv.txt", sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE)
+        NC <- matrix(rbinom(prod(dim(Cs)), size = Ns - Cs, prob = matrix(nonconv, nrow = nrow(Cs), ncol = ncol(Cs))), nrow = nrow(Cs), ncol = ncol(Cs))
+        d[1:(nrow(d) / 4) * 4 - 3,] <- Cs + NC
+        d[1:(nrow(d) / 4) * 4,] <- d[1:(nrow(d) / 4) * 4 - 3,] / d[1:(nrow(d) / 4) * 4 - 1,]
+    }
+  
   d<-rbind(locs,diff_methed,d)
   #wrap up the simulated data into a single variable
   #transpose
@@ -116,7 +175,6 @@ find_the_blocks<-function(a){
   l<-length(a)
   coords<-list()
   index<-1
-  state<-a[1]
   on<-1
   off<-0
  # this needs to go to l + 1 or the last cytosine is not included - TJH
@@ -398,7 +456,7 @@ number_of_CpGs <-get_variable("Please enter the number of CpGs to simulate (defa
 
 probability_of_success_in_differentially_methylated_region<-get_variable("Please enter probability of success in  methylated region (default: 0.9)",0.9)
 
-probability_of_success_in_non_differentially_methylated_region<-get_variable("Please enter probability of success in non methylated region (default: 0.1)",0.1)
+probability_of_success_in_non_methylated_region<-get_variable("Please enter probability of success in non methylated region (default: 0.1)",0.1)
 
 error_rate_in_differentially_methylated_region <-get_variable("Please enter error rate in differentially methylated region (default: 0.1)",0.1)
 
@@ -426,6 +484,12 @@ output_path <- paste0(analysis_folder,analysis_name)
 
 type <-get_text("Do you want to use the binomial or truncated simulator (default: binomial)","binomial")
 
+nonconvPar <-convert_to_array(get_text("Please enter shape parameters for beta-distribution on nonconversion rates (default: NA)","NA"))
+
+tranMPar <-convert_to_array(get_text("Please enter transition probabilities and length rate moderation for methylation regions (default: 0.01,0.001895)","0.01,0.001895"))
+
+tranNPar <-convert_to_array(get_text("Please enter transition probabilities and length rate moderation for non-methylated regions (default: 0.08,0.001895)","0.08,0.001895"))
+
 phase_difference_between_two_samples <- c(0,phase_diff)
 
 file_to_write_results_to <- '/tmp/simulated_WGBS_data'
@@ -438,9 +502,10 @@ transition_matrix_for_CpG_locations <-matrix(c(0.65, 0.35,0.2, 0.8),byrow=TRUE, 
 transition_matrix_for_probability_distributions <- matrix(c(0.9,0.1,0.1,0.9),byrow=TRUE, nrow=2)
 type_of_locations <- 2
 
-#do the simulation
-run <- init_simulation(number_of_CpGs,probability_of_success_in_differentially_methylated_region,probability_of_success_in_non_differentially_methylated_region,error_rate_in_differentially_methylated_region,error_rate_in_non_differentially_methylated_region,mean_number_of_reads_in_differentially_methylated_region,mean_number_of_reads_in_non_differentially_methylated_region,number_of_replicas,number_of_samples,phase_diff,balance,cpg_matrix,output_path,type)
+cat(paste(c(number_of_CpGs,probability_of_success_in_differentially_methylated_region,probability_of_success_in_non_methylated_region,error_rate_in_differentially_methylated_region,error_rate_in_non_differentially_methylated_region,mean_number_of_reads_in_differentially_methylated_region,mean_number_of_reads_in_non_differentially_methylated_region,number_of_replicas,number_of_samples,phase_diff,balance,paste(as.numeric(cpg_matrix), collapse = ","),output_path,type,nonconvPar), collapse = "\n"))
 
+#do the simulation
+run <- init_simulation(number_of_CpGs,probability_of_success_in_differentially_methylated_region,probability_of_success_in_non_methylated_region,error_rate_in_differentially_methylated_region,error_rate_in_non_differentially_methylated_region,mean_number_of_reads_in_differentially_methylated_region,mean_number_of_reads_in_non_differentially_methylated_region,number_of_replicas,number_of_samples,phase_diff,balance,cpg_matrix,output_path,type,tranMPar, tranNPar, nonconvPar)
 return(list(run,number_of_replicas,output_path))
 
 }
@@ -448,7 +513,7 @@ return(list(run,number_of_replicas,output_path))
 ###############################################################################
 #initiate the function based on args                                          #
 ###############################################################################
-init_simulation <- function (number_of_CpGs,probability_of_success_in_differentially_methylated_region,probability_of_success_in_non_differentially_methylated_region,error_rate_in_differentially_methylated_region,error_rate_in_non_differentially_methylated_region,mean_number_of_reads_in_differentially_methylated_region,mean_number_of_reads_in_non_differentially_methylated_region,number_of_replicas,number_of_samples,phase_diff,balance,cpg_matrix,output_path,type){
+init_simulation <- function (number_of_CpGs,probability_of_success_in_differentially_methylated_region,probability_of_success_in_non_methylated_region,error_rate_in_differentially_methylated_region,error_rate_in_non_differentially_methylated_region,mean_number_of_reads_in_differentially_methylated_region,mean_number_of_reads_in_non_differentially_methylated_region,number_of_replicas,number_of_samples,phase_diff,balance,cpg_matrix,output_path,type,tranMPar, tranNPar, nonconvPar){
 #get the variables from the command line
 
 phase_difference_between_two_samples <- c(0,phase_diff)
@@ -473,7 +538,7 @@ simulated_data <-generate_sim_set(number_of_CpGs,
                 transition_matrix_for_CpG_locations,
                 transition_matrix_for_probability_distributions,
                 mean_number_of_reads_in_differentially_methylated_region,
-                mean_number_of_reads_in_non_differentially_methylated_region,
+                mean_number_of_reads_in_non_methylated_region,
                 probability_of_success_in_differentially_methylated_region,
                 probability_of_success_in_non_differentially_methylated_region,
                 error_rate_in_differentially_methylated_region,
@@ -487,7 +552,7 @@ simulated_data <-generate_sim_set(number_of_CpGs,
                 transition_size,
                 balance,
                 output_path,
-                type
+                type, tranMPar, tranNPar, nonconvPar
                   )
 #run the summary script
 summarise_simulated_data(simulated_data,number_of_replicas,number_of_samples)
@@ -618,7 +683,7 @@ read_count_distribution <- function(generated_set,number_of_replicas,number_of_s
 ###############################################################################
 reduce_by_distance <- function (x,b){
   #given a value and decay value decrease a value by the the decay function.
-  y <- exp(b * log(x))
+  y <- exp(-b * log(x))
   return(y)
 }
 
@@ -656,7 +721,7 @@ convert_to_array <- function (x){
 #-3.895e-02 but this should be updated in the future and helper function to   #
 #calculate it from the data should be written                                 #
 ###############################################################################
-simulate_state_transition <- function (n,Pi,locs,start,transition_size){
+simulate_state_transition <- function (n,Pi,locs,start,transition_size,rates){
   #initially set the current state to 2
   trans_up <- seq(from = 3, to = transition_size+2)
   trans_down <- seq(from = transition_size+2, to = 3)
@@ -681,8 +746,8 @@ simulate_state_transition <- function (n,Pi,locs,start,transition_size){
     dist<-locs[i]-locs[i-1];
     #store the distance
     dist_transition[i]<-dist
-    #calcualte the probability of changing state based on the distance
-    prob<-Pi[current_state]*reduce_by_distance(dist,-1.895e-02)
+    #calcualte the probability of changing state based on the distance (and given rates - TJH)
+    prob<-Pi[current_state]*reduce_by_distance(dist,rates[current_state])
     #store the value
     prob_transition[i]<-prob
     #randomly sample to see if the state should change
@@ -947,9 +1012,8 @@ options(warn=1)
 
 #run the interactive launch script if the correct number of command line arguments has not been supplied
 args <- commandArgs(trailingOnly = TRUE)
-if(length(args)==14){
-      filename<-init_simulation(as.numeric(args[1]),as.numeric(args[2]),as.numeric(args[3]),as.numeric(args[4]),as.numeric(args[5]),as.numeric(args[6]),as.numeric(args[7]),as.numeric(args[8]),as.numeric(args[9]),as.numeric(args[10]),as.numeric(args[11]),convert_to_array(args[12]),args[13],args[14])
-      cat("\n##########################SIMULATION COMPLETE############################\n")
+if(length(args)>=14){
+      filename<-init_simulation(as.numeric(args[1]),as.numeric(args[2]),as.numeric(args[3]),as.numeric(args[4]),as.numeric(args[5]),as.numeric(args[6]),as.numeric(args[7]),as.numeric(args[8]),as.numeric(args[9]),as.numeric(args[10]),as.numeric(args[11]),convert_to_array(args[12]),args[13],args[14],convert_to_array(args[15]),convert_to_array(args[16]),convert_to_array(args[17]))      cat("\n##########################SIMULATION COMPLETE############################\n")
       cat(paste("\nThe simulated data can be found here:\n",filename,"\n"))
       cat(paste0("\nA pdf summarising the simulated data can be found here:\n",filename,".pdf\n"))
       cmd<-paste("\nRscript benchmark_WGBS.R",filename,"2",as.numeric(args[8]),"1 999999 1 1 15 30 100 1000000 0 0 200 0 0",args[13],"0")
@@ -972,8 +1036,7 @@ if(length(args)==14){
       rocs<-list()
       times<-list()
       for(rep in 1:reps){
-        files[[rep]]<-init_simulation(as.numeric(args[2]),as.numeric(args[3]),as.numeric(args[4]),as.numeric(args[5]),as.numeric(args[6]),as.numeric(args[7]),as.numeric(args[8]),as.numeric(args[9]),as.numeric(args[10]),as.numeric(args[11]),as.numeric(args[12]),convert_to_array(args[13]),paste0(args[14],"rep_",rep),args[15])
-        index<-length(rocs)+1
+        files[[rep]]<-init_simulation(as.numeric(args[2]),as.numeric(args[3]),as.numeric(args[4]),as.numeric(args[5]),as.numeric(args[6]),as.numeric(args[7]),as.numeric(args[8]),as.numeric(args[9]),as.numeric(args[10]),as.numeric(args[11]),as.numeric(args[12]),convert_to_array(args[13]),paste0(args[14],"rep_",rep),args[15],convert_to_array(args[16]),convert_to_array(args[17]),convert_to_array(args[18]))        index<-length(rocs)+1
         dat<-auto_init_benchmark(files[[rep]],2,3,1,999999,1,0.1,15,100,100,1000000,0.5,1,200,0.0,0,files[[rep]],0,'binomial')
         rocs[[rep]]<-dat[[1]]
         times[[rep]]<-dat[[2]]
