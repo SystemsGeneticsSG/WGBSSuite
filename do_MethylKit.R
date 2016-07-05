@@ -20,7 +20,8 @@ reformat_for_methylkit <- function(d,number_of_samples,number_of_replicas,output
 
   total <- number_of_samples*number_of_replicas
   dm <- dim(d[[1]])
-  pos<- d[[1]][,1]
+  # I can't quite remember when the cast to integer is necessary, but it doesn't do any harm - TJH
+  pos<- as.integer(d[[1]][,1])
   states <- d[[1]][,2]
   l<-dm[1];
   results=list() 
@@ -64,7 +65,8 @@ reformat_for_methylkit <- function(d,number_of_samples,number_of_replicas,output
 
      
   }
-       myobj=read(filelist,sample.id=sampleid,assembly="bench",treatment=as.numeric(treatment),context="CpG")
+  # needs header = FALSE or the first cytosine goes missing - TJH
+       myobj=read(filelist,sample.id=sampleid,assembly="bench",treatment=as.numeric(treatment),context="CpG", header = FALSE)
        meth=unite(myobj, destrand=FALSE)
        myDiff=calculateDiffMeth(meth)
 
