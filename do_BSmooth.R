@@ -51,7 +51,16 @@ reformat_for_bsmooth <- function(d,number_of_samples,number_of_replicas){
             fish_time<-(proc.time() - ptm)[1]
             #reset the timer
             ptm <- proc.time()
-			BS.combo.smooth.tstat <- BSmooth.tstat(BS.combo.smooth,group1 = groups[[1]],group2 = groups[[2]],estimate.var = "same",local.correct = TRUE,verbose = TRUE)
+        noLocal <- FALSE
+
+        # sometimes local.correct fails and the whole simulation crashes. I've put this catch in to recover from this for now - TJH
+        BS.combo.smooth.tstat <- try(BSmooth.tstat(BS.combo.smooth,group1 = groups[[1]],group2 = groups[[2]],estimate.var = "same",local.correct = TRUE,verbose = TRUE))
+        if(class(BS.combo.smooth.tstat) == "try-error") {
+            BS.combo.smooth.tstat <- BSmooth.tstat(BS.combo.smooth,group1 = groups[[1]],group2 = groups[[2]],estimate.var = "same",local.correct = FALSE,verbose = TRUE)
+            warning("Local correction in BSmooth failed.")
+            noLocal <- TRUE
+        }
+        
             b_time<-(proc.time() - ptm)[1]
 			return(list(BS.combo.smooth.tstat,BS.fish,combo,BS.combo.smooth,fish_time,b_time))
 }
