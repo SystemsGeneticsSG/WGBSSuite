@@ -32,11 +32,26 @@ generate_sim_set <- function(n,m,Pi_m,Pi_d,mean_m,mean_d,prob_m,prob_d,error_m,e
   #extract the postions of the blocks
   state_blocks<-find_the_blocks(a)
 
+
+  #this needs to be changed to reflect the changes in the find_the_blocks function - TJH
+  
   #set the percentage of DM in each block type
-  percs_for_diff<-c(0,0,0,0.5)
+  percs_for_diff<-c(0.5,0,0,0)
 
   #update the blocks to be differentially methylated
   diff_methed <- make_differential(state_blocks,percs_for_diff,a)
+
+                                        # this bit is optional I guess, but it seems to me to make more sense that if a region is DM, then the transition states on either side are also DM. Otherwise, depending on your parameters, you could have the transition spikes be more methylated than the differentially methylated region for one of the experimental conditions. If you allow differential behaviour in non-methylated regions, or at random transition locations (i.e., if any value except the first in percs_for_diff to be non-zero) then this code needs some more tweaking. - TJH
+  spla <- split(as.integer(a[1,]), rep(1:nrow(state_blocks), state_blocks[,4]))
+  spldm <- split(as.integer(diff_methed[1,]), rep(1:nrow(state_blocks), state_blocks[,4]))
+  dmBlocks <- which(sapply(spldm, function(x) all(x == 1)))
+  leftTransition <- dmBlocks[which(sapply(spla[dmBlocks - 1], function(x) all(!is.null(x)) & all(x == 4)))] - 1
+  rightTransition <- dmBlocks[which(sapply(spla[dmBlocks + 1], function(x) all(!is.null(x)) & all(x == 2)))] + 1
+  spldm[leftTransition] <- sapply(spldm[leftTransition], function(x) rep(1, length(x)))
+  spldm[rightTransition] <- sapply(spldm[rightTransition], function(x) rep(1, length(x)))
+
+  diff_methed[1,] <- unlist(spldm)  
+
 
   #create the simulated reads methylated/unmethylated at each CpG, at the moment this is hard coded to be 3 replicates of each type
   #The phase diff param control how different the methylation is in the differentially methylated regions.
@@ -104,18 +119,20 @@ find_the_blocks<-function(a){
   state<-a[1]
   on<-1
   off<-0
-  for(i in 2:l){
-    if(a[i-1] != a[i]){
-      if(on == 0){
-        on<-i
-      }else{
-        off<-i
-        coords[[index]]<-c(on,off,a[i],off-on)
-        index<-index+1
-        on<-i
-        off<-0
+ # this needs to go to l + 1 or the last cytosine is not included - TJH
+  for(i in 2:(l + 1)){
+      # check introduced to capture last cytosine - TJH
+      if(a[i-1] != a[i] | i > 1){
+          # I think the check for on = 0 is redundant because it never can be - TJH
+
+          # some tweaks needed here - it seems to make more sense if the coordinate structure matches the 'a' vector - TJH
+          # also adding ' + 1' to the width matches GRanges conventions - TJH
+          off<-i - 1          
+          coords[[index]]<-c(on,off,a[i-1],off-on + 1)
+          index<-index+1
+          on<-i
+          off<-0
       }
-    }
   }
   coords_mat <- do.call(rbind,coords)
   return(coords_mat)
