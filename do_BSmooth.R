@@ -62,7 +62,7 @@ reformat_for_bsmooth <- function(d,number_of_samples,number_of_replicas){
         }
         
             b_time<-(proc.time() - ptm)[1]
-			return(list(BS.combo.smooth.tstat,BS.fish,combo,BS.combo.smooth,fish_time,b_time))
+			return(list(BS.combo.smooth.tstat,BS.fish,combo,BS.combo.smooth,fish_time,b_time, noLocal = noLocal))
 }
 
 calculate_fisher <- function(bsmooth_object,g1,g2){
