@@ -91,6 +91,8 @@ auto_init_benchmark <- function(filename,number_of_samples,number_of_replicas,mi
         #create an array of FDR values that are equally spaced accoress each order of magnitiude (ie for a log scale)
         FDR_cutoffs <- sort(c(seq(1,9,10/breaks_per_order) %o% 10^-(1:lowest_order)))
 
+        methsig_results <- bsmooth_results <- fish_result <- bsmooth_local <- NULL
+
         names<-list()
         ROC<-list()
         ts<-list()
@@ -152,6 +154,7 @@ auto_init_benchmark <- function(filename,number_of_samples,number_of_replicas,mi
         bsmooth_obj  <- bsmooth_for_bench(dataset[[1]],number_of_samples,number_of_replicas)
         #save the bsmooth and fishers exact test results and store in seperate variables.
         bsmooth_results <- bsmooth_obj[[1]]
+        bsmooth_local <- bsmooth_obj$noLocal
         fish_result <- bsmooth_obj[[2]]
         fish_pvals<-bsmooth_obj[[2]]$results
         #create the fishers exact ROC curve
@@ -183,9 +186,10 @@ auto_init_benchmark <- function(filename,number_of_samples,number_of_replicas,mi
         plot_AUC(ROC,names_for_plot,output_path)
         plot_ROC(ROC,names_for_plot,output_path)
         plot_Time(times_for_plot,names_for_plot,output_path)
-        save(ROC,ts,dfs_locs,file=paste0(output_path,".RData"))
+        benchFile <- paste0(output_path,"_benchmarking.RData")
+        save(ROC,names_for_plot,ts,dfs_locs,diff_meth_locs,methsig_results,methylkit_results, bsmooth_results,fish_result, bsmooth_local, file=benchFile)
         sink()
-        return(list(ROC,ts,output_path))
+        return(list(ROC,ts,output_path, benchFile = benchFile))
 }
 
 
@@ -193,26 +197,27 @@ auto_init_benchmark <- function(filename,number_of_samples,number_of_replicas,mi
 #takes the results from each of the benchmarkings and plots the results on an #
 #ROC curve so that the performance can be compared.                           #
 ###############################################################################
-plot_ROC <- function (ROCs,names,filename){
+plot_ROC <- function (ROCs,names,filename,...){
         #get the number of techniques that are going to be tested
         s <- length(ROCs)
 
-        #open a pdf to save the results
-        pdf(paste(filename,".ROC.pdf",sep=""))
-
+        #if filename given, open a pdf to save the results - otherwise just plot to the open graphics window.
+        if(!missing(filename)) pdf(paste(filename,".ROC.pdf",sep=""))
+        
         #loop through all of the techniques
         for(i in 1:s){
                 #check if its the first and plot the ROC or else add to the ROC plot.
                 if(i==1){
-                plot(1-as.double(ROCs[[i]][6,]),as.double(ROCs[[i]][5,]),,ylim=c(0,1),xlim=c(0,1),col=i, main="ROC performance of methylation software", xlab="1-specificity", ylab="sensitivity",type='s')
+                plot(1-as.double(ROCs[[i]][6,]),as.double(ROCs[[i]][5,]),,ylim=c(0,1),xlim=c(0,1),col=i, xlab="1-specificity", ylab="sensitivity",type='s', ...)
                 }else{
                 lines(1-as.double(ROCs[[i]][6,]),as.double(ROCs[[i]][5,]),col=i,ylim=c(0,1),xlim=c(0,1),type='s')
                 }
                 #insert the legend to the bottom right.
                 legend("bottomright", names, col = seq(1,s), lwd = 1, title="key")
         }
-        #close the pdf
-        dev.off()
+        
+        if(!missing(filename)) dev.off() else return(cbind(names, seq(1,s)))
+
 }
 
 ###############################################################################
@@ -404,6 +409,7 @@ if(length(args)==18){
       cat(paste0("\nThe ROC analysis is here: \n",rd[[3]],".ROC.pdf\n"))
       cat(paste0("\nThe AUC analysis is here: \n",rd[[3]],".AUC.pdf\n"))
       cat(paste0("\nThe Runtime analysis is here: \n",rd[[3]],".times.pdf\n"))
+      cat(paste0("\nThe saved image is here: \n",rd$benchFile,"\n"))
 }else if(length(args)==1){
     if(args[1]=='interactive'){
        rd<-init_interactive_benchmark()
