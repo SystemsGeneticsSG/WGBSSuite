@@ -136,6 +136,9 @@ summarise_real_data <- function(generated_set,number_of_replicas,number_of_sampl
   cat(paste("The probability of success in a unmethylated region: ",methylation_settings[[3]][[2]]),"\n")
   cat(paste("The average coverage in a methylated region: ",round(methylation_settings[[3]][[3]])),"\n")
   cat(paste("The average coverage in an unmethylated region: ",round(methylation_settings[[3]][[4]])),"\n")
+  cat(paste("The transition probability and length moderation in a methylated region: ",paste(methylation_settings[[6]][[1]], sep = ";")),"\n")
+  cat(paste("The transition probability and length moderation in an unmethylated region: ",paste(methylation_settings[[6]][[2]], sep = ";")),"\n")
+
   distances<-distance_distribution(generated_set)
   distance_coefs<-distances[[1]]
   l<-length(distances[[2]])
@@ -231,10 +234,58 @@ methylation_distribution <- function(generated_set,number_of_replicas,number_of_
 
   hist((all_fail/all_coverage),main="failures over coverage")
   hist((all_success/all_coverage),main="success over coverage")
-  meth_fitted_results <- fit_methylation_distribution(all_meth,0.5,all_coverage)
+  
+  #hard coded for now but should be updated to incorporate e.g. Olshen
+  split <- 0.5 
+  transition_probs <- fit_transitional_probs(pos = generated_set[,1], meth_set = all_meth, split = split)
+  meth_fitted_results <- fit_methylation_distribution(all_meth,split,all_coverage)
+  
   #negbinomial_for_success <- fit_negativebinomial_to_methylation_distribution(all_meth,0.2,0.8,all_success, "methylated reads")
-  return(list(av_diff_mean,av_diff_sd,meth_fitted_results,max_diff,av_diff))
+  return(list(av_diff_mean,av_diff_sd,meth_fitted_results,max_diff,av_diff,transition_probs))
 }
+
+###############################################################################
+#estimate transitional probabilities and length adjustments                   #
+###############################################################################
+fit_transitional_probs <- function(pos, meth_set, split) {
+
+    # maximum likelihood fitting on transition probabilities from methylated to unmethylated state and vice versa
+
+    dp <- diff(pos)
+    methMat <- matrix(meth_set, ncol = length(meth_set) / (length(dp) + 1), nrow = length(dp) + 1)[-length(dp) + 1,]
+    
+    methC <- rowSums(methMat > 0.5) > 1
+    dp[1:10]
+
+    runs <- rle(methC)
+
+    #this is the analytical solution if you drop the length adjustments
+    #y <- runs$lengths[runs$values == TRUE]; methTrans <- 1 / (1 + sum(y - 1) / length(y))
+    #y <- runs$lengths[runs$values == FALSE]; nonmTrans <- 1 / (1 + sum(y - 1) / length(y))
+
+    # but if you don't, you need numerical optimisation 
+    
+    opLengthMod <- function(pars, dpLen) {
+        q <- pars[1]; r <- pars[2]
+        if(q >= 1 | q <= 0 | r < 0) return(NA)
+        -sum(sapply(dpLen, function(x) {
+            x <- x[x > 0]
+            ps <- q * exp(-log(x) * r)
+            sum(log(c(1 - ps[-length(ps)], ps[length(ps)])), na.rm = TRUE)
+        }))
+    }
+
+    mRuns <- runs$lengths[runs$values == TRUE]
+    mdpLen <- split(dp[methC], rep(1:length(mRuns), mRuns))
+    mPar <- optim(c(0.2, 0.0001), opLengthMod, dpLen = mdpLen)$par
+    
+    nRuns <- runs$lengths[runs$values == FALSE]
+    ndpLen <- split(dp[!methC], rep(1:length(nRuns), nRuns))
+    nPar <- optim(c(0.2, 0.0001), opLengthMod, dpLen = ndpLen)$par
+
+    list(mPar, nPar)
+}
+    
 
 ###############################################################################
 #fit spacing distribution to real data                                        #
@@ -242,6 +293,8 @@ methylation_distribution <- function(generated_set,number_of_replicas,number_of_
 fit_methylation_distribution <- function(meth_set,split,coverage){
   #seperate the nearby CpG and the total set and then fit two seperate distributions to these
   #two sets.
+  
+  
   methylated <- meth_set[meth_set>split]
   un_methylated <- meth_set[meth_set<split]
   methylated_average <- mean(methylated,na.rm = T)
